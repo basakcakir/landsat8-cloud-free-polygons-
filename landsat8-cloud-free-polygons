@@ -1,0 +1,38 @@
+// 1. Cloud Mask Function (creates binary mask)
+function cloudMaskBinary(image) {
+  var qa = image.select('QA_PIXEL');
+  var cloud = qa.bitwiseAnd(1 << 3).eq(0);   // true if no cloud
+  var cirrus = qa.bitwiseAnd(1 << 2).eq(0);  // true if no cirrus
+  var cleanMask = cloud.and(cirrus);
+  return image.updateMask(cleanMask).select(0).gt(-9999).rename('clean'); // returns 1-band binary image
+}
+
+// 2. Image Collection (single image is enough)
+var collection = ee.ImageCollection('LANDSAT/LC08/C02/T1')
+  .filterDate('2024-01-01', '2024-07-31')
+  .filter('CLOUD_COVER <10')
+  .filterBounds(table)
+  .map(cloudMaskBinary);
+
+// 3. Take the first image (sufficient for polygon extraction)
+var firstMask = collection.first().clip(table);
+
+// 4. Convert binary mask to vector (cloud-free areas = pixels with value 1)
+var cloudFreePolygon = firstMask.reduceToVectors({
+  geometry: table,
+  scale: 30,
+  geometryType: 'polygon',
+  labelProperty: 'mask',
+  eightConnected: false,
+  maxPixels: 1e10
+});
+
+// 5. Add to Map (visual check)
+Map.addLayer(cloudFreePolygon, {color: '00FF00'}, 'Cloud-Free Areas (Polygon)');
+
+// 6. Export (Shapefile or GeoJSON)
+Export.table.toDrive({
+  collection: cloudFreePolygon,
+  description: 'CloudFree_Polygon',
+  fileFormat: 'SHP' // can also be 'GeoJSON'
+});
